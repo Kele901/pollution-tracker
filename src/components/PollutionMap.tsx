@@ -1,15 +1,77 @@
-import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Circle, Popup, Rectangle, useMapEvents } from 'react-leaflet';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useNearbyStations } from '@/lib/api';
 import { PollutionData } from '@/types';
 import { PollutionTimeline } from './PollutionTimeline';
 import 'leaflet/dist/leaflet.css';
+import * as L from 'leaflet';
+
+// Extend the L namespace to include heatLayer
+declare module 'leaflet' {
+  export function heatLayer(
+    latlngs: L.LatLngExpression[],
+    options?: any
+  ): L.Layer;
+}
 
 interface PollutionMapProps {
   center: [number, number];
   zoom: number;
+}
+
+// HeatmapLayer component to handle heat layer initialization
+function HeatmapLayer({ data }: { data: [number, number, number][] }) {
+  const map = useMap();
+  const heatLayerRef = useRef<L.Layer | null>(null);
+  
+  useEffect(() => {
+    if (!map || !data.length) return;
+
+    // Dynamically import leaflet.heat
+    const initHeatmap = async () => {
+      try {
+        await import('leaflet.heat');
+        
+        // Clean up previous layer if it exists
+        if (heatLayerRef.current) {
+          map.removeLayer(heatLayerRef.current);
+        }
+
+        // Create new heat layer
+        const heat = (window as any).L.heatLayer(data, {
+          radius: 30,
+          blur: 20,
+          maxZoom: 12,
+          max: 200,
+          gradient: {
+            0.0: '#00ff00',
+            0.3: '#ffff00',
+            0.5: '#ff8c00',
+            0.7: '#ff0000',
+            0.9: '#800080',
+            1.0: '#4b0082'
+          }
+        });
+
+        heat.addTo(map);
+        heatLayerRef.current = heat;
+      } catch (error) {
+        console.error('Error initializing heatmap:', error);
+      }
+    };
+
+    initHeatmap();
+
+    return () => {
+      if (heatLayerRef.current) {
+        map.removeLayer(heatLayerRef.current);
+      }
+    };
+  }, [map, data]);
+
+  return null;
 }
 
 const getAQIColor = (aqi: number): string => {
@@ -38,45 +100,17 @@ const getAQICategory = (aqi: number): string => {
   return 'Hazardous';
 };
 
-function MapClickHandler({ onStationClick }: { onStationClick: (station: PollutionData) => void }) {
-  useMapEvents({
-    click: (e) => {
-      // Handle map click if needed
-    }
-  });
-  return null;
-}
-
 export default function PollutionMap({ center, zoom }: PollutionMapProps) {
   const { data: stations = [], isLoading } = useNearbyStations(center[0], center[1]);
-  const [pollutionMasks, setPollutionMasks] = useState<Array<{
-    bounds: [[number, number], [number, number]];
-    opacity: number;
-  }>>([]);
   const [selectedStation, setSelectedStation] = useState<PollutionData | null>(null);
   const [historicalData, setHistoricalData] = useState<PollutionData[]>([]);
-  const [mapReady, setMapReady] = useState(false);
 
-  useEffect(() => {
-    // Set map as ready after a short delay to ensure container is properly rendered
-    const timer = setTimeout(() => {
-      setMapReady(true);
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (stations.length > 0) {
-      const masks = stations.map(station => ({
-        bounds: [
-          [station.coordinates.latitude - 0.5, station.coordinates.longitude - 0.5],
-          [station.coordinates.latitude + 0.5, station.coordinates.longitude + 0.5]
-        ] as [[number, number], [number, number]],
-        opacity: getMaskOpacity(station.aqi)
-      }));
-      setPollutionMasks(masks);
-    }
+  const getHeatmapData = useCallback((): [number, number, number][] => {
+    return stations.map(station => [
+      station.coordinates.latitude,
+      station.coordinates.longitude,
+      station.aqi * 1.75 // Intensity multiplier
+    ]);
   }, [stations]);
 
   const handleStationClick = (station: PollutionData) => {
@@ -113,61 +147,66 @@ export default function PollutionMap({ center, zoom }: PollutionMapProps) {
 
   if (isLoading) {
     return (
-      <Card className="w-full overflow-hidden rounded-lg">
-        <div className="h-[70vh] flex items-center justify-center">
-          <p className="text-gray-500">Loading map...</p>
+      <Card className="w-full h-[50vh] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="mt-2 text-sm text-gray-500">Loading map...</p>
         </div>
       </Card>
     );
   }
 
   return (
-    <Card className="w-full overflow-hidden rounded-lg">
-      <div className="h-[70vh] w-full">
-        {mapReady && (
-          <MapContainer
-            center={center}
-            zoom={zoom}
-            className="h-full w-full z-0"
-            style={{ height: '100%', width: '100%' }}
-          >
-            <MapClickHandler onStationClick={handleStationClick} />
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            
-            {/* Station Markers */}
-            {stations.map((station, index) => (
-              <Circle
-                key={`station-${index}`}
-                center={[station.coordinates.latitude, station.coordinates.longitude]}
-                radius={2000}
-                pathOptions={{
-                  color: getAQIColor(station.aqi),
-                  fillColor: getAQIColor(station.aqi),
-                  fillOpacity: 0.2,
-                  weight: 0.5,
-                }}
-                eventHandlers={{
-                  click: () => handleStationClick(station)
-                }}
-              >
-                <Popup className="min-w-[200px]">
-                  <div className="p-2">
-                    <h3 className="font-semibold text-sm">{station.location}</h3>
-                    <p className="text-xs">AQI: {station.aqi}</p>
-                    <p className="text-xs">Category: {getAQICategory(station.aqi)}</p>
-                    <p className="text-xs text-gray-500">
-                      Last Updated: {new Date(station.timestamp).toLocaleString()}
-                    </p>
-                  </div>
-                </Popup>
-              </Circle>
-            ))}
-          </MapContainer>
-        )}
-      </div>
+    <div className="space-y-4">
+      <Card className="w-full h-[50vh] relative">
+        <MapContainer
+          center={center}
+          zoom={zoom}
+          style={{ height: '100%', width: '100%' }}
+          className="rounded-lg"
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          />
+          <HeatmapLayer data={getHeatmapData()} />
+        </MapContainer>
+        <div className="absolute bottom-4 right-4 bg-white/95 dark:bg-gray-800/95 p-4 rounded-md shadow-lg z-[1000] backdrop-blur-sm">
+          <h3 className="text-sm font-semibold mb-3">Air Quality Index</h3>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <span>Good (0-50)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <span>Moderate (51-100)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-orange-500" />
+              <span>Unhealthy for Sensitive Groups (101-150)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <span>Unhealthy (151-200)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-700" />
+              <span>Very Unhealthy (201-300)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-900" />
+              <span>Hazardous (301+)</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+      {historicalData.length > 0 && selectedStation && (
+        <PollutionTimeline 
+          data={historicalData} 
+          location={selectedStation.location} 
+        />
+      )}
 
       {/* Detailed Pollution Dialog */}
       {selectedStation && (
@@ -232,6 +271,6 @@ export default function PollutionMap({ center, zoom }: PollutionMapProps) {
           </DialogContent>
         </Dialog>
       )}
-    </Card>
+    </div>
   );
 } 

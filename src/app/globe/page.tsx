@@ -1,6 +1,23 @@
 'use client';
 
-import { GlobalPollutionMap } from '@/components/GlobalPollutionMap';
+import dynamic from 'next/dynamic';
+import { Card } from '@/components/ui/card';
+
+// Dynamically import the GlobalPollutionMap component
+const GlobalPollutionMap = dynamic(
+  () => import('@/components/GlobalPollutionMap').then((mod) => mod.GlobalPollutionMap),
+  {
+    ssr: false,
+    loading: () => (
+      <Card className="w-full h-[70vh] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          <p className="mt-2 text-sm text-gray-500">Loading map...</p>
+        </div>
+      </Card>
+    ),
+  }
+);
 
 export default function GlobePage() {
   return (

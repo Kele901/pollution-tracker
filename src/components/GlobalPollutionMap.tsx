@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic';
 import { getGlobalPollutionData } from '@/lib/api';
 import { PollutionData } from '@/types';
 import 'leaflet/dist/leaflet.css';
+import { Card } from '@/components/ui/card';
+import type { ComponentType } from 'react';
 
 // Dynamically import Leaflet components with no SSR
 const MapContainer = dynamic(
@@ -17,126 +19,95 @@ const TileLayer = dynamic(
   { ssr: false }
 );
 
+const CircleMarker = dynamic(
+  () => import('react-leaflet').then((mod) => mod.CircleMarker),
+  { ssr: false }
+);
+
+const Tooltip = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Tooltip),
+  { ssr: false }
+);
+
+interface HeatLayerProps {
+  data: Array<[number, number, number]>;
+}
+
+// Create a dynamic HeatmapLayer component
+const HeatmapLayer = dynamic<HeatLayerProps>(() =>
+  Promise.resolve().then(async () => {
+    const L = (await import('leaflet')).default;
+    await import('leaflet.heat');
+    const { useMap } = await import('react-leaflet');
+
+    const HeatLayer: ComponentType<HeatLayerProps> = ({ data }) => {
+      const map = useMap();
+      const heatLayerRef = useRef<any>(null);
+
+      useEffect(() => {
+        if (!map || !data.length) return;
+
+        // Clean up previous layer if it exists
+        if (heatLayerRef.current) {
+          map.removeLayer(heatLayerRef.current);
+        }
+
+        // Ensure the heatLayer function is available
+        if (typeof L.heatLayer === 'function') {
+          // Create new heat layer
+          const heat = L.heatLayer(data, {
+            radius: 30,
+            blur: 20,
+            maxZoom: 15,
+            max: 1.0,
+            minOpacity: 0.5,
+            gradient: {
+              0.0: 'rgba(0, 255, 0, 0.75)',
+              0.15: 'rgba(150, 255, 0, 0.8)',
+              0.3: 'rgba(255, 255, 0, 0.85)',
+              0.45: 'rgba(255, 200, 0, 0.87)',
+              0.6: 'rgba(255, 100, 0, 0.9)',
+              0.75: 'rgba(255, 0, 0, 0.92)',
+              0.9: 'rgba(200, 0, 100, 0.94)',
+              1.0: 'rgba(100, 0, 100, 0.96)'
+            }
+          });
+
+          heat.addTo(map);
+          heatLayerRef.current = heat;
+        } else {
+          console.error('L.heatLayer is not available');
+        }
+
+        return () => {
+          if (heatLayerRef.current) {
+            map.removeLayer(heatLayerRef.current);
+          }
+        };
+      }, [map, data]);
+
+      return null;
+    };
+
+    return HeatLayer;
+  }),
+  { ssr: false }
+);
+
 export function GlobalPollutionMap() {
+  const [pollutionData, setPollutionData] = useState<PollutionData[]>([]);
   const [heatmapData, setHeatmapData] = useState<Array<[number, number, number]>>([]);
   const [loading, setLoading] = useState(true);
-  const heatLayerRef = useRef<any>(null);
-  const animationFrameRef = useRef<number>();
-  const timeRef = useRef<number>(0);
-
-  const animateHeatmap = useCallback((map: any, L: any) => {
-    const animate = () => {
-      // Even smoother, slower animation
-      timeRef.current += 0.003;
-      
-      if (heatLayerRef.current) {
-        // More subtle pulsing effect with smaller oscillation
-        const pulseScale = Math.sin(timeRef.current) * 0.08 + 1; // oscillates between 0.92 and 1.08
-        
-        // Refined base values for better visualization
-        const baseRadius = 25; // Slightly smaller base radius
-        const baseBlur = 15;   // Less blur for sharper definition
-        
-        // Smooth transitions with easing
-        const currentRadius = baseRadius * (pulseScale + Math.sin(timeRef.current * 0.5) * 0.02); // Extra subtle variation
-        const currentBlur = baseBlur * pulseScale;
-
-        // Update the heatmap layer with enhanced settings
-        map.removeLayer(heatLayerRef.current);
-        heatLayerRef.current = L.heatLayer(heatmapData.map(([lat, lng, intensity]) => {
-          // More sophisticated intensity modulation
-          const timeOffset = Math.sin(timeRef.current + (lat + lng) * 0.1) * 0.03; // Location-based variation
-          const intensityScale = 0.97 + timeOffset; // Subtle intensity variation
-          return [
-            lat,
-            lng,
-            intensity * intensityScale
-          ];
-        }), {
-          radius: currentRadius,
-          blur: currentBlur,
-          maxZoom: 15, // Higher max zoom for more detail
-          max: 1.0,
-          minOpacity: 0.4, // Slightly higher minimum opacity
-          gradient: {
-            0.0: 'rgba(0, 255, 0, 0.7)',     // Slightly more opaque green
-            0.15: 'rgba(150, 255, 0, 0.75)',  // Yellow-green transition
-            0.3: 'rgba(255, 255, 0, 0.8)',    // Yellow
-            0.45: 'rgba(255, 200, 0, 0.82)',  // Orange-yellow
-            0.6: 'rgba(255, 100, 0, 0.85)',   // Orange
-            0.75: 'rgba(255, 0, 0, 0.87)',    // Red
-            0.9: 'rgba(200, 0, 100, 0.9)',    // Red-purple
-            1.0: 'rgba(100, 0, 100, 0.92)'    // Deep purple
-          }
-        }).addTo(map);
-      }
-
-      animationFrameRef.current = requestAnimationFrame(animate);
-    };
-
-    animate();
-
-    // Cleanup function
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [heatmapData]);
-
-  const initializeMap = useCallback(async (mapInstance: any) => {
-    if (!heatmapData.length) return;
-
-    try {
-      const L = (await import('leaflet')).default;
-      await import('leaflet.heat');
-
-      // Clear existing layers
-      mapInstance.eachLayer((layer: any) => {
-        if (layer._url === undefined) {
-          mapInstance.removeLayer(layer);
-        }
-      });
-
-      // Initialize the heatmap layer with refined settings
-      heatLayerRef.current = L.heatLayer(heatmapData, {
-        radius: 25, // Smaller initial radius
-        blur: 15,   // Less blur
-        maxZoom: 15,
-        max: 1.0,
-        minOpacity: 0.4,
-        gradient: {
-          0.0: 'rgba(0, 255, 0, 0.7)',
-          0.15: 'rgba(150, 255, 0, 0.75)',
-          0.3: 'rgba(255, 255, 0, 0.8)',
-          0.45: 'rgba(255, 200, 0, 0.82)',
-          0.6: 'rgba(255, 100, 0, 0.85)',
-          0.75: 'rgba(255, 0, 0, 0.87)',
-          0.9: 'rgba(200, 0, 100, 0.9)',
-          1.0: 'rgba(100, 0, 100, 0.92)'
-        }
-      }).addTo(mapInstance);
-
-      // Start the animation
-      const cleanup = animateHeatmap(mapInstance, L);
-
-      // Cleanup when map is destroyed
-      mapInstance.on('unload', cleanup);
-    } catch (error) {
-      console.error('Error initializing heatmap:', error);
-    }
-  }, [heatmapData, animateHeatmap]);
 
   useEffect(() => {
     const fetchGlobalData = async () => {
       try {
         const data = await getGlobalPollutionData();
+        setPollutionData(data);
         const points = data.map((item: PollutionData) => [
           item.coordinates.latitude,
           item.coordinates.longitude,
-          // More sophisticated intensity calculation
-          Math.min((item.aqi / 200) * 2, 1) * // Base scaling
-          (0.9 + Math.random() * 0.2) // Small random variation for more natural look
+          Math.min((item.aqi / 200) * 2, 1) * (0.9 + Math.random() * 0.2)
         ]) as Array<[number, number, number]>;
         setHeatmapData(points);
       } catch (error) {
@@ -147,36 +118,90 @@ export function GlobalPollutionMap() {
     };
 
     fetchGlobalData();
-
-    // Cleanup animation on unmount
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
   }, []);
+
+  const getMarkerColor = (aqi: number): string => {
+    if (aqi <= 50) return '#00E400';
+    if (aqi <= 100) return '#FFFF00';
+    if (aqi <= 150) return '#FF7E00';
+    if (aqi <= 200) return '#FF0000';
+    if (aqi <= 300) return '#8F3F97';
+    return '#7E0023';
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[600px] bg-gray-100 dark:bg-gray-800">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
+      <Card className="w-full h-[70vh] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          <p className="mt-2 text-sm text-gray-500">Loading global pollution data...</p>
+        </div>
+      </Card>
     );
   }
 
   return (
-    <div className="relative w-full h-[600px] rounded-lg overflow-hidden">
+    <Card className="w-full h-[70vh] relative">
       <MapContainer
         center={[20, 0]}
         zoom={2}
-        className="h-full w-full"
-        whenReady={({ target: map }) => initializeMap(map)}
+        style={{ height: '100%', width: '100%' }}
+        className="rounded-lg"
+        scrollWheelZoom={true}
       >
         <TileLayer
-          attribution='© OpenStreetMap contributors, © CARTO'
-          url='https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-          maxZoom={19}
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
+        <HeatmapLayer data={heatmapData} />
+        {pollutionData.map((item, index) => (
+          <CircleMarker
+            key={`marker-${index}`}
+            center={[item.coordinates.latitude, item.coordinates.longitude]}
+            radius={1}
+            eventHandlers={{
+              mouseover: (e) => {
+                e.target.setStyle({ weight: 1, opacity: 0.8, fillOpacity: 0.8 });
+                e.target.bringToFront();
+              },
+              mouseout: (e) => {
+                e.target.setStyle({ 
+                  weight: 0.1,
+                  opacity: 0.4,
+                  fillOpacity: 0.5
+                });
+              }
+            }}
+            pathOptions={{
+              fillColor: getMarkerColor(item.aqi),
+              color: 'white',
+              weight: 0.1,
+              opacity: 0.4,
+              fillOpacity: 0.5,
+              interactive: true,
+              bubblingMouseEvents: false
+            }}
+          >
+            <Tooltip 
+              direction="top"
+              offset={[0, -5]}
+              opacity={1}
+              permanent={false}
+              sticky={true}
+            >
+              <div className="p-2">
+                <div className="font-bold">{item.location}</div>
+                <div>AQI: {item.aqi}</div>
+                <div className="text-sm">
+                  PM2.5: {item.pollutants.pm25} µg/m³<br />
+                  PM10: {item.pollutants.pm10} µg/m³<br />
+                  O3: {item.pollutants.o3} µg/m³<br />
+                  NO2: {item.pollutants.no2} µg/m³
+                </div>
+              </div>
+            </Tooltip>
+          </CircleMarker>
+        ))}
       </MapContainer>
       <div className="absolute bottom-4 right-4 bg-white/95 dark:bg-gray-800/95 p-4 rounded-md shadow-lg z-[1000] backdrop-blur-sm">
         <h3 className="text-sm font-semibold mb-3">Air Quality Index</h3>
@@ -203,6 +228,6 @@ export function GlobalPollutionMap() {
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 } 

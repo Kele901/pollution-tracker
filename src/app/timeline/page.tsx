@@ -1,11 +1,29 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Card } from '@/components/ui/card';
-import { PollutionTimeline } from '@/components/PollutionTimeline';
+import dynamic from 'next/dynamic';
 import { usePollutionData } from '@/hooks/usePollutionData';
 import { PollutionData } from '@/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+// Dynamically import the PollutionTimeline component
+const PollutionTimeline = dynamic(
+  () => import('@/components/PollutionTimeline').then(mod => ({ default: mod.PollutionTimeline })),
+  {
+    loading: () => (
+      <Card className="p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+            <p className="mt-2 text-sm text-muted-foreground">Loading timeline...</p>
+          </div>
+        </div>
+      </Card>
+    ),
+    ssr: false
+  }
+);
 
 const popularLocations = [
   { name: 'London', coordinates: { latitude: 51.5074, longitude: -0.1278 } },
@@ -37,9 +55,8 @@ export default function TimelinePage() {
     const generateHistoricalData = () => {
       const now = new Date();
       const data: PollutionData[] = [];
-      let hoursToGenerate = 24; // Default to 24 hours
+      let hoursToGenerate = 24;
 
-      // Calculate hours to generate based on selected period
       switch (selectedPeriod) {
         case '7d':
           hoursToGenerate = 24 * 7;
@@ -52,45 +69,33 @@ export default function TimelinePage() {
           break;
       }
 
-      // Generate data points with less frequency for longer periods
-      const interval = hoursToGenerate > 24 ? Math.ceil(hoursToGenerate / 100) : 1; // Limit to ~100 data points
-      for (let i = hoursToGenerate; i >= 0; i -= interval) {
-        const timestamp = new Date(now.getTime() - i * 60 * 60 * 1000);
+      // Calculate data points with optimized frequency
+      const interval = Math.max(1, Math.floor(hoursToGenerate / 100));
+      const dataPoints = Math.ceil(hoursToGenerate / interval);
+      
+      for (let i = 0; i < dataPoints; i++) {
+        const hoursAgo = hoursToGenerate - (i * interval);
+        const timestamp = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
         const hour = timestamp.getHours();
         const day = timestamp.getDay();
         
-        // Base values with daily and hourly variations
         const dailyVariation = Math.sin((day / 7) * Math.PI) * 0.2;
         const hourlyVariation = Math.sin((hour / 24) * Math.PI) * 0.3;
         const randomVariation = (Math.random() - 0.5) * 0.1;
         
         const variation = dailyVariation + hourlyVariation + randomVariation;
-        
-        const aqi = Math.max(0, Math.min(500, 
-          currentData.aqi * (1 + variation)
-        ));
-
-        // Generate pollutant values based on AQI
-        const basePollutants = {
-          pm25: currentData.pollutants.pm25 * (1 + variation),
-          pm10: currentData.pollutants.pm10 * (1 + variation),
-          o3: currentData.pollutants.o3 * (1 + variation),
-          no2: currentData.pollutants.no2 * (1 + variation),
-          so2: currentData.pollutants.so2 * (1 + variation),
-          co: currentData.pollutants.co * (1 + variation),
-        };
+        const aqi = Math.max(0, Math.min(500, currentData.aqi * (1 + variation)));
 
         data.push({
           timestamp: timestamp.toISOString(),
           aqi: Math.round(aqi),
           pollutants: {
-            ...basePollutants,
-            pm25: Math.round(basePollutants.pm25),
-            pm10: Math.round(basePollutants.pm10),
-            o3: Math.round(basePollutants.o3),
-            no2: Math.round(basePollutants.no2),
-            so2: Math.round(basePollutants.so2),
-            co: Math.round(basePollutants.co),
+            pm25: Math.round(currentData.pollutants.pm25 * (1 + variation)),
+            pm10: Math.round(currentData.pollutants.pm10 * (1 + variation)),
+            o3: Math.round(currentData.pollutants.o3 * (1 + variation)),
+            no2: Math.round(currentData.pollutants.no2 * (1 + variation)),
+            so2: Math.round(currentData.pollutants.so2 * (1 + variation)),
+            co: Math.round(currentData.pollutants.co * (1 + variation))
           },
           location: currentData.location,
           coordinates: currentData.coordinates,
@@ -159,12 +164,24 @@ export default function TimelinePage() {
 
               {isLoading ? (
                 <div className="flex items-center justify-center h-64">
-                  <div>Loading pollution data...</div>
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+                    <p className="mt-2 text-sm text-muted-foreground">Loading pollution data...</p>
+                  </div>
                 </div>
               ) : currentData ? (
-                <div className="mt-4">
-                  <PollutionTimeline data={historicalData} location={selectedLocation.name} />
-                </div>
+                <Suspense fallback={
+                  <div className="flex items-center justify-center h-64">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+                      <p className="mt-2 text-sm text-muted-foreground">Preparing timeline...</p>
+                    </div>
+                  </div>
+                }>
+                  <div className="mt-4">
+                    <PollutionTimeline data={historicalData} location={selectedLocation.name} />
+                  </div>
+                </Suspense>
               ) : (
                 <div className="text-center py-8">
                   No data available for the selected location

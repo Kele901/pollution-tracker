@@ -18,12 +18,16 @@ export function Navigation() {
             <Link 
               href="/" 
               className="text-lg font-semibold"
+              target="_blank"
+              rel="noopener noreferrer"
             >
               Pollution Tracker
             </Link>
             <div className="flex items-center space-x-6">
               <Link
                 href="/"
+                target="_blank"
+                rel="noopener noreferrer"
                 className={`flex items-center space-x-2 transition-colors hover:text-primary ${
                   isActive('/') ? 'text-primary' : 'text-muted-foreground'
                 }`}
@@ -33,6 +37,8 @@ export function Navigation() {
               </Link>
               <Link
                 href="/locations"
+                target="_blank"
+                rel="noopener noreferrer"
                 className={`flex items-center space-x-2 transition-colors hover:text-primary ${
                   isActive('/locations') ? 'text-primary' : 'text-muted-foreground'
                 }`}
@@ -42,6 +48,8 @@ export function Navigation() {
               </Link>
               <Link
                 href="/timeline"
+                target="_blank"
+                rel="noopener noreferrer"
                 className={`flex items-center space-x-2 transition-colors hover:text-primary ${
                   isActive('/timeline') ? 'text-primary' : 'text-muted-foreground'
                 }`}
@@ -51,6 +59,8 @@ export function Navigation() {
               </Link>
               <Link
                 href="/globe"
+                target="_blank"
+                rel="noopener noreferrer"
                 className={`flex items-center space-x-2 transition-colors hover:text-primary ${
                   isActive('/globe') ? 'text-primary' : 'text-muted-foreground'
                 }`}
