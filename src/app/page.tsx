@@ -12,18 +12,28 @@ const PollutionMap = dynamic(() => import('@/components/PollutionMap'), {
   ssr: false,
   loading: () => (
     <Card className="w-full h-[70vh] flex items-center justify-center">
-      <p>Loading map...</p>
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <p className="mt-2 text-sm text-muted-foreground">Loading map...</p>
+      </div>
     </Card>
   ),
 });
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 export default function Home() {
   const [currentLocation, setCurrentLocation] = useState<[number, number]>([51.5074, -0.1278]); // Default to London
 
   useEffect(() => {
-    if (navigator.geolocation) {
+    if (typeof window !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;

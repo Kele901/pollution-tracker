@@ -12,6 +12,11 @@ const nextConfig = {
     };
     return config;
   },
+  output: 'standalone',
+  experimental: {
+    optimizeCss: true,
+  },
+  poweredByHeader: false
 }
 
 module.exports = nextConfig 
